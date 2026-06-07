@@ -35,10 +35,10 @@ def _cache_set(key: str, val):
     _cache[key] = (time.time(), val)
 
 
-def _run(fn, *args, **kwargs):
+async def _run(fn, *args, **kwargs):
     """Run a blocking function in the thread pool."""
-    loop = asyncio.get_event_loop()
-    return loop.run_in_executor(_pool, lambda: fn(*args, **kwargs))
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_pool, lambda: fn(*args, **kwargs))
 
 
 # ── Routes ──────────────────────────────────────────────────────────────────
