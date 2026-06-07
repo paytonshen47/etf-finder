@@ -77,7 +77,7 @@ async def search(q: str = Query(..., min_length=1)):
     return data
 
 
-@app.get("/api/etfs/{symbol}")
+@app.get("/api/etfs/{symbol:path}")
 async def etfs_for_stock(symbol: str):
     symbol = symbol.upper()
     key = f"etfs:{symbol}"
@@ -222,7 +222,7 @@ async def _get_etf_info(symbol: str) -> dict | None:
     return result
 
 
-@app.get("/api/etf/{symbol}")
+@app.get("/api/etf/{symbol:path}")
 async def etf_detail(symbol: str):
     symbol = symbol.upper()
     key = f"etf_detail:{symbol}"
