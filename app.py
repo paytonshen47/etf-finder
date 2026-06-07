@@ -3,6 +3,7 @@ ETF Finder — find ETFs by stock holding, powered by Yahoo Finance (yfinance).
 No API key required.
 """
 import asyncio
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -45,7 +46,7 @@ def _run(fn, *args, **kwargs):
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    with open(__file__.replace("app.py", "index.html")) as f:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")) as f:
         return f.read()
 
 
@@ -349,7 +350,6 @@ def _usd_fx(currency: str) -> float:
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 8000))
     print(f"\n  ETF Finder → http://localhost:{port}\n  No API key required — powered by Yahoo Finance\n")
     uvicorn.run(app, host="0.0.0.0", port=port)
