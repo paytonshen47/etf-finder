@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ETF Finder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1f2937;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-dim: #1f3a5f;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --radius: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+    }
+
+    /* ── Layout ── */
+    .app { display: flex; flex-direction: column; min-height: 100vh; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--surface);
+    }
+    header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text);
+    }
+    header .logo {
+      width: 28px; height: 28px;
+      background: var(--accent);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 800; color: #fff;
+    }
+    header .sub { color: var(--muted); font-size: 13px; margin-left: 4px; }
+
+    main { flex: 1; padding: 32px; max-width: 1100px; margin: 0 auto; width: 100%; }
+
+    /* ── Setup banner ── */
+    .setup-banner {
+      background: #2d1b0e;
+      border: 1px solid #7c4a1e;
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      display: none;
+    }
+    .setup-banner.show { display: block; }
+    .setup-banner h3 { color: #f0a045; margin-bottom: 8px; font-size: 14px; }
+    .setup-banner p { color: #c49a6c; line-height: 1.6; font-size: 13px; }
+    .setup-banner code {
+      background: #1a1008;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #f0a045;
+    }
+
+    /* ── Search ── */
+    .search-wrap {
+      position: relative;
+      margin-bottom: 32px;
+    }
+    .search-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .search-input-wrap { position: relative; flex: 1; max-width: 480px; }
+    #search {
+      width: 100%;
+      padding: 12px 16px 12px 44px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #search:focus { border-color: var(--accent); }
+    #search::placeholder { color: var(--muted); }
+    .search-icon {
+      position: absolute;
+      left: 14px; top: 50%; transform: translateY(-50%);
+      color: var(--muted); pointer-events: none; font-size: 16px;
+    }
+    #search-btn {
+      padding: 12px 20px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    #search-btn:hover { opacity: 0.85; }
+    #search-btn:disabled { opacity: 0.5; cursor: default; }
+
+    /* autocomplete */
+    #autocomplete {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      z-index: 100;
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      display: none;
+    }
+    #autocomplete.show { display: block; }
+    .ac-item {
+      padding: 10px 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: background 0.1s;
+    }
+    .ac-item:hover, .ac-item.focused { background: var(--surface2); }
+    .ac-ticker {
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 13px;
+      width: 70px;
+      flex-shrink: 0;
+    }
+    .ac-name { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ac-exchange { margin-left: auto; font-size: 11px; color: var(--muted); flex-shrink: 0; }
+
+    /* ── Selected stock pill ── */
+    #selected-stock {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent-dim);
+      border: 1px solid var(--accent);
+      border-radius: 20px;
+      padding: 5px 12px 5px 10px;
+      font-size: 13px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    #selected-stock.show { display: flex; }
+    #selected-stock button {
+      background: none; border: none; color: var(--accent);
+      cursor: pointer; font-size: 16px; line-height: 1;
+      padding: 0; margin-left: 2px;
+    }
+
+    /* ── Status / spinner ── */
+    .status {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 16px;
+      min-height: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: none;
+    }
+    .spinner.show { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── ETF results table ── */
+    #results-section { display: none; }
+    #results-section.show { display: block; }
+
+    .section-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .filter-btn {
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.1s;
+    }
+    .filter-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+    .filter-btn:hover:not(.active) { border-color: var(--muted); color: var(--text); }
+
+    .table-wrap {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      background: var(--surface);
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+    thead th:hover { color: var(--text); }
+    thead th .sort-arrow { margin-left: 4px; opacity: 0.4; }
+    thead th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+      cursor: pointer;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td {
+      padding: 11px 14px;
+      font-size: 13px;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .td-symbol { font-weight: 700; color: var(--accent); }
+    .td-name { color: var(--muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    .td-weight { font-weight: 600; }
+    .td-aum { }
+    .td-exp { }
+    .td-cur .pill {
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .pill-usd { background: #0d2b1a; color: #3fb950; border: 1px solid #1a4a2a; }
+    .pill-eur { background: #1a1f3a; color: #58a6ff; border: 1px solid #2a3a5a; }
+    .pill-other { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+    .td-yield {}
+    .na { color: var(--muted); }
+
+    /* ── Detail panel ── */
+    #detail-panel {
+      display: none;
+      position: fixed;
+      top: 0; right: 0;
+      width: 480px; height: 100vh;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 200;
+      overflow-y: auto;
+      box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+      animation: slideIn 0.2s ease-out;
+    }
+    #detail-panel.show { display: block; }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+    #panel-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 199;
+    }
+    #panel-overlay.show { display: block; }
+
+    .panel-header {
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .panel-close {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+      padding: 2px;
+      flex-shrink: 0;
+    }
+    .panel-close:hover { color: var(--text); }
+    .panel-title { font-size: 20px; font-weight: 700; }
+    .panel-subtitle { color: var(--muted); font-size: 13px; margin-top: 3px; }
+
+    .panel-body { padding: 20px; }
+
+    .panel-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-value { font-size: 16px; font-weight: 700; margin-top: 3px; }
+
+    .panel-section { margin-bottom: 24px; }
+    .panel-section-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    /* Performance bars */
+    .perf-grid { display: flex; flex-direction: column; gap: 6px; }
+    .perf-row { display: flex; align-items: center; gap: 10px; }
+    .perf-label { width: 38px; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+    .perf-bar-wrap { flex: 1; height: 18px; background: var(--surface2); border-radius: 3px; overflow: hidden; position: relative; }
+    .perf-bar { height: 100%; border-radius: 3px; min-width: 2px; }
+    .perf-bar.pos { background: var(--green); }
+    .perf-bar.neg { background: var(--red); margin-left: auto; }
+    .perf-val { width: 52px; text-align: right; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+    .perf-val.pos { color: var(--green); }
+    .perf-val.neg { color: var(--red); }
+
+    /* Holdings list */
+    .holding-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .holding-row:last-child { border-bottom: none; }
+    .holding-rank { width: 18px; font-size: 11px; color: var(--muted); flex-shrink: 0; }
+    .holding-ticker { font-weight: 700; width: 60px; color: var(--accent); font-size: 13px; }
+    .holding-name { color: var(--muted); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .holding-bar-wrap { width: 70px; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .holding-bar { height: 100%; background: var(--accent); border-radius: 3px; }
+    .holding-pct { width: 42px; text-align: right; font-size: 12px; font-weight: 600; }
+
+    /* ── Panel spinner ── */
+    .panel-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .panel-loading .spinner { display: block; width: 24px; height: 24px; }
+
+    /* ── Error ── */
+    .error-msg {
+      background: #2d1117;
+      border: 1px solid #6e2a2a;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      color: #f47174;
+      font-size: 13px;
+      display: none;
+    }
+    .error-msg.show { display: block; }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+      display: none;
+    }
+    .empty.show { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .empty .icon { font-size: 36px; }
+    .empty h3 { color: var(--text); font-size: 16px; }
+    .empty p { font-size: 13px; max-width: 320px; line-height: 1.6; }
+
+    .hint {
+      margin-top: 40px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .hint.hide { display: none; }
+    .hint .examples { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+    .example-chip {
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.1s;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .example-chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+    @media (max-width: 600px) {
+      main { padding: 20px 16px; }
+      #detail-panel { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">E</div>
+    <h1>ETF Finder</h1>
+    <span class="sub">— find ETFs by their holdings</span>
+  </header>
+
+  <main>
+    <div id="setup-banner" class="setup-banner" style="display:none"></div>
+
+    <div class="search-wrap">
+      <div class="search-row">
+        <div class="search-input-wrap">
+          <span class="search-icon">🔍</span>
+          <input
+            id="search"
+            type="text"
+            placeholder="Stock name or ticker — e.g. Rheinmetall, NVDA, ASML…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div id="autocomplete"></div>
+        </div>
+        <div id="selected-stock">
+          <span id="selected-label"></span>
+          <button id="clear-btn" title="Clear">×</button>
+        </div>
+        <button id="search-btn" disabled>Find ETFs</button>
+      </div>
+    </div>
+
+    <div class="status">
+      <div id="spinner" class="spinner"></div>
+      <span id="status-text"></span>
+    </div>
+    <div id="error-msg" class="error-msg"></div>
+
+    <div id="results-section">
+      <div class="section-label" id="results-label"></div>
+      <div class="filter-row" id="filter-row">
+        <button class="filter-btn active" data-filter="all">All currencies</button>
+        <button class="filter-btn" data-filter="USD">USD only</button>
+        <button class="filter-btn" data-filter="EUR">EUR only</button>
+      </div>
+      <div class="table-wrap">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th data-col="symbol">Ticker <span class="sort-arrow">↕</span></th>
+              <th data-col="name">Name <span class="sort-arrow">↕</span></th>
+              <th data-col="weight">Weight <span class="sort-arrow">↕</span></th>
+              <th data-col="aum">AUM <span class="sort-arrow">↕</span></th>
+              <th data-col="expenseRatio">Exp. Ratio <span class="sort-arrow">↕</span></th>
+              <th data-col="currency">Currency <span class="sort-arrow">↕</span></th>
+              <th data-col="dividendYield">Div. Yield <span class="sort-arrow">↕</span></th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="empty-state" class="empty">
+      <div class="icon">🔍</div>
+      <h3>No ETFs found</h3>
+      <p>No ETFs in the database hold this stock, or it may not be indexed. Try searching by ticker symbol directly.</p>
+    </div>
+
+    <div id="hint" class="hint">
+      <div>Search for any stock to find ETFs that hold it</div>
+      <div class="examples">
+        <div class="example-chip" data-q="Rheinmetall">Rheinmetall</div>
+        <div class="example-chip" data-q="TSMC">TSMC</div>
+        <div class="example-chip" data-q="NVIDIA">NVIDIA</div>
+        <div class="example-chip" data-q="ASML">ASML</div>
+        <div class="example-chip" data-q="Alibaba">Alibaba</div>
+        <div class="example-chip" data-q="Shell">Shell</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Detail panel -->
+<div id="panel-overlay"></div>
+<div id="detail-panel">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title" id="panel-title">—</div>
+      <div class="panel-subtitle" id="panel-subtitle">—</div>
+    </div>
+    <button class="panel-close" id="panel-close">×</button>
+  </div>
+  <div class="panel-body" id="panel-body">
+    <div class="panel-loading">
+      <div class="spinner show"></div>
+      <div>Loading ETF data…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const searchEl = document.getElementById('search');
+  const acEl = document.getElementById('autocomplete');
+  const btnEl = document.getElementById('search-btn');
+  const spinnerEl = document.getElementById('spinner');
+  const statusEl = document.getElementById('status-text');
+  const errorEl = document.getElementById('error-msg');
+  const resultsSection = document.getElementById('results-section');
+  const resultsBody = document.getElementById('results-body');
+  const resultsLabel = document.getElementById('results-label');
+  const emptyEl = document.getElementById('empty-state');
+  const hintEl = document.getElementById('hint');
+  const selectedEl = document.getElementById('selected-stock');
+  const selectedLabel = document.getElementById('selected-label');
+  const clearBtn = document.getElementById('clear-btn');
+  const panel = document.getElementById('detail-panel');
+  const panelOverlay = document.getElementById('panel-overlay');
+  const panelBody = document.getElementById('panel-body');
+  const panelTitle = document.getElementById('panel-title');
+  const panelSubtitle = document.getElementById('panel-subtitle');
+  const panelClose = document.getElementById('panel-close');
+  const filterRow = document.getElementById('filter-row');
+
+  let allResults = [];
+  let selectedSymbol = null;
+  let selectedName = null;
+  let acResults = [];
+  let acFocused = -1;
+  let acDebounce = null;
+  let sortCol = 'weight';
+  let sortAsc = false;
+  let currencyFilter = 'all';
+
+  // ── Autocomplete ──
+  searchEl.addEventListener('input', () => {
+    const q = searchEl.value.trim();
+    btnEl.disabled = !selectedSymbol && q.length < 2;
+    clearTimeout(acDebounce);
+    if (q.length < 2) { acEl.classList.remove('show'); return; }
+    acDebounce = setTimeout(() => fetchAC(q), 250);
+  });
+
+  searchEl.addEventListener('keydown', e => {
+    if (!acEl.classList.contains('show')) {
+      if (e.key === 'Enter' && selectedSymbol) doSearch();
+      return;
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveFocus(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveFocus(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); selectAC(acFocused); }
+    else if (e.key === 'Escape') { acEl.classList.remove('show'); }
+  });
+
+  document.addEventListener('click', e => {
+    if (!searchEl.contains(e.target) && !acEl.contains(e.target)) {
+      acEl.classList.remove('show');
+    }
+  });
+
+  async function fetchAC(q) {
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      if (!res.ok) {
+        if (res.status === 400) showSetupBanner();
+        return;
+      }
+      const data = await res.json();
+      acResults = Array.isArray(data) ? data.slice(0, 8) : [];
+      renderAC();
+    } catch { /* ignore */ }
+  }
+
+  function renderAC() {
+    if (!acResults.length) { acEl.classList.remove('show'); return; }
+    acEl.innerHTML = acResults.map((r, i) => `
+      <div class="ac-item" data-idx="${i}">
+        <span class="ac-ticker">${esc(r.symbol)}</span>
+        <span class="ac-name">${esc(r.name || '')}</span>
+        <span class="ac-exchange">${esc(r.exchangeShortName || r.stockExchange || '')}</span>
+      </div>
+    `).join('');
+    acEl.querySelectorAll('.ac-item').forEach(el => {
+      el.addEventListener('click', () => selectAC(+el.dataset.idx));
+      el.addEventListener('mouseenter', () => { acFocused = +el.dataset.idx; highlightAC(); });
+    });
+    acFocused = -1;
+    acEl.classList.add('show');
+  }
+
+  function moveFocus(dir) {
+    acFocused = Math.max(-1, Math.min(acResults.length - 1, acFocused + dir));
+    highlightAC();
+  }
+
+  function highlightAC() {
+    acEl.querySelectorAll('.ac-item').forEach((el, i) => {
+      el.classList.toggle('focused', i === acFocused);
+    });
+  }
+
+  function selectAC(idx) {
+    const item = acResults[idx] || acResults[0];
+    if (!item) return;
+    selectedSymbol = item.symbol;
+    selectedName = item.name || item.symbol;
+    searchEl.value = '';
+    searchEl.placeholder = 'Search another stock…';
+    selectedLabel.textContent = `${item.symbol} · ${item.name || ''}`;
+    selectedEl.classList.add('show');
+    btnEl.disabled = false;
+    acEl.classList.remove('show');
+    doSearch();
+  }
+
+  clearBtn.addEventListener('click', () => {
+    selectedSymbol = null;
+    selectedName = null;
+    selectedEl.classList.remove('show');
+    searchEl.value = '';
+    searchEl.placeholder = 'Stock name or ticker — e.g. Rheinmetall, NVDA, ASML…';
+    btnEl.disabled = true;
+    resultsSection.classList.remove('show');
+    emptyEl.classList.remove('show');
+    hintEl.classList.remove('hide');
+    setStatus('');
+    setError('');
+    allResults = [];
+  });
+
+  btnEl.addEventListener('click', doSearch);
+
+  // ── Example chips ──
+  document.querySelectorAll('.example-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      searchEl.value = chip.dataset.q;
+      fetchAC(chip.dataset.q);
+      searchEl.focus();
+    });
+  });
+
+  // ── Main search ──
+  async function doSearch() {
+    if (!selectedSymbol) return;
+    hintEl.classList.add('hide');
+    emptyEl.classList.remove('show');
+    resultsSection.classList.remove('show');
+    setError('');
+    setStatus(`Finding ETFs that hold ${selectedSymbol}…`);
+    setSpinner(true);
+    btnEl.disabled = true;
+
+    try {
+      const res = await fetch(`/api/etfs/${encodeURIComponent(selectedSymbol)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        if (res.status === 400) { showSetupBanner(); }
+        setError(err.detail || `Error ${res.status}`);
+        setStatus('');
+        setSpinner(false);
+        btnEl.disabled = false;
+        return;
+      }
+      const data = await res.json();
+      allResults = Array.isArray(data) ? data : [];
+      if (allResults.length === 0) {
+        emptyEl.classList.add('show');
+        setStatus('');
+      } else {
+        renderResults();
+        setStatus('');
+      }
+    } catch (e) {
+      setError('Network error — is the server running?');
+      setStatus('');
+    }
+    setSpinner(false);
+    btnEl.disabled = false;
+  }
+
+  // ── Filter ──
+  filterRow.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterRow.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currencyFilter = btn.dataset.filter;
+      renderResults();
+    });
+  });
+
+  // ── Sort ──
+  document.querySelectorAll('thead th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) sortAsc = !sortAsc;
+      else { sortCol = col; sortAsc = false; }
+      document.querySelectorAll('thead th').forEach(t => t.classList.remove('sorted'));
+      th.classList.add('sorted');
+      th.querySelector('.sort-arrow').textContent = sortAsc ? '↑' : '↓';
+      renderResults();
+    });
+  });
+
+  function renderResults() {
+    let rows = allResults.filter(r => {
+      if (currencyFilter === 'all') return true;
+      return (r.currency || '').toUpperCase() === currencyFilter;
+    });
+
+    rows = rows.slice().sort((a, b) => {
+      let av = a[sortCol], bv = b[sortCol];
+      if (av == null) av = sortAsc ? Infinity : -Infinity;
+      if (bv == null) bv = sortAsc ? Infinity : -Infinity;
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      return sortAsc ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+    });
+
+    const count = rows.length;
+    resultsLabel.textContent = `${count} ETF${count !== 1 ? 's' : ''} hold ${selectedSymbol}`;
+
+    resultsBody.innerHTML = rows.map(r => `
+      <tr data-symbol="${esc(r.symbol)}">
+        <td class="td-symbol">${esc(r.symbol)}</td>
+        <td class="td-name" title="${esc(r.name || '')}">${esc(r.name || '—')}</td>
+        <td class="td-weight">${r.weight != null ? r.weight.toFixed(2) + '%' : '<span class="na">—</span>'}</td>
+        <td class="td-aum">${fmtAUM(r.aum)}</td>
+        <td class="td-exp">${r.expenseRatio != null ? (r.expenseRatio * 100).toFixed(2) + '%' : '<span class="na">—</span>'}</td>
+        <td class="td-cur">${currencyPill(r.currency)}</td>
+        <td class="td-yield">${r.dividendYield != null ? (r.dividendYield * 100).toFixed(2) + '%' : '<span class="na">—</span>'}</td>
+      </tr>
+    `).join('');
+
+    resultsBody.querySelectorAll('tr').forEach(tr => {
+      tr.addEventListener('click', () => openPanel(tr.dataset.symbol));
+    });
+
+    if (rows.length === 0) {
+      resultsBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">No ETFs match this filter.</td></tr>`;
+    }
+
+    resultsSection.classList.add('show');
+    emptyEl.classList.remove('show');
+  }
+
+  // ── ETF Detail Panel ──
+  async function openPanel(symbol) {
+    const etf = allResults.find(r => r.symbol === symbol);
+    panelTitle.textContent = symbol;
+    panelSubtitle.textContent = etf?.name || '';
+    panelBody.innerHTML = `
+      <div class="panel-loading">
+        <div class="spinner show"></div>
+        <div>Loading ETF data…</div>
+      </div>`;
+    panel.classList.add('show');
+    panelOverlay.classList.add('show');
+
+    try {
+      const res = await fetch(`/api/etf/${encodeURIComponent(symbol)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      renderPanel(symbol, etf, data);
+    } catch (e) {
+      panelBody.innerHTML = `<div style="color:var(--red);padding:20px">Failed to load data: ${e.message}</div>`;
+    }
+  }
+
+  function renderPanel(symbol, etfRow, data) {
+    const info = data.info || {};
+    const holdings = data.holdings || [];
+    const perf = data.performance || {};
+
+    const stats = [
+      { label: 'AUM', value: fmtAUM(info.aum || etfRow?.aum) },
+      { label: 'Expense Ratio', value: info.expenseRatio != null ? (info.expenseRatio * 100).toFixed(2) + '%' : '—' },
+      { label: 'Div. Yield', value: info.dividendYield != null ? (info.dividendYield * 100).toFixed(2) + '%' : '—' },
+      { label: 'Currency', value: info.currency || etfRow?.currency || '—' },
+      { label: 'Holdings #', value: info.numberOfHoldings != null ? info.numberOfHoldings.toLocaleString() : '—' },
+      { label: 'Inception', value: info.inceptionDate || '—' },
+    ];
+
+    const perfKeys = ['YTD', '2024', '2023', '2022', '2021', '2020'];
+    const perfVals = perfKeys.filter(k => perf[k] != null).map(k => ({ label: k, val: perf[k] }));
+    const maxAbs = perfVals.length ? Math.max(...perfVals.map(p => Math.abs(p.val))) : 1;
+
+    const topWeight = holdings.length ? Math.max(...holdings.map(h => parseFloat(h.weightPercentage || 0))) : 1;
+
+    panelBody.innerHTML = `
+      <div class="panel-stats">
+        ${stats.map(s => `
+          <div class="stat-card">
+            <div class="stat-label">${esc(s.label)}</div>
+            <div class="stat-value">${esc(s.value)}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      ${perfVals.length ? `
+      <div class="panel-section">
+        <div class="panel-section-title">Performance</div>
+        <div class="perf-grid">
+          ${perfVals.map(p => {
+            const pos = p.val >= 0;
+            const pct = Math.abs(p.val) / maxAbs * 100;
+            return `
+              <div class="perf-row">
+                <div class="perf-label">${esc(p.label)}</div>
+                <div class="perf-bar-wrap">
+                  <div class="perf-bar ${pos ? 'pos' : 'neg'}" style="width:${pct}%"></div>
+                </div>
+                <div class="perf-val ${pos ? 'pos' : 'neg'}">${pos ? '+' : ''}${p.val.toFixed(1)}%</div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>` : ''}
+
+      ${holdings.length ? `
+      <div class="panel-section">
+        <div class="panel-section-title">Top ${holdings.length} Holdings</div>
+        ${holdings.map((h, i) => {
+          const w = parseFloat(h.weightPercentage || 0);
+          const barPct = (w / topWeight * 100).toFixed(1);
+          return `
+            <div class="holding-row">
+              <div class="holding-rank">${i + 1}</div>
+              <div class="holding-ticker">${esc(h.asset || '')}</div>
+              <div class="holding-name">${esc(h.name || '')}</div>
+              <div class="holding-bar-wrap"><div class="holding-bar" style="width:${barPct}%"></div></div>
+              <div class="holding-pct">${w.toFixed(2)}%</div>
+            </div>`;
+        }).join('')}
+      </div>` : ''}
+
+      ${info.description ? `
+      <div class="panel-section">
+        <div class="panel-section-title">About</div>
+        <div style="color:var(--muted);font-size:13px;line-height:1.6">${esc(info.description)}</div>
+      </div>` : ''}
+    `;
+  }
+
+  panelClose.addEventListener('click', closePanel);
+  panelOverlay.addEventListener('click', closePanel);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+  function closePanel() {
+    panel.classList.remove('show');
+    panelOverlay.classList.remove('show');
+  }
+
+  // ── Setup banner ──
+  function showSetupBanner() {
+    document.getElementById('setup-banner').classList.add('show');
+  }
+
+  // Check on load
+  fetch('/api/search?q=test').then(r => { if (r.status === 400) showSetupBanner(); }).catch(() => {});
+
+  // ── Helpers ──
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function fmtAUM(n) {
+    if (n == null || n === '') return '<span class="na">—</span>';
+    n = parseFloat(n);
+    if (isNaN(n)) return '<span class="na">—</span>';
+    if (n >= 1e9) return '$' + (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return '$' + (n / 1e6).toFixed(0) + 'M';
+    return '$' + n.toLocaleString();
+  }
+
+  function currencyPill(cur) {
+    if (!cur) return '<span class="na">—</span>';
+    const c = cur.toUpperCase();
+    const cls = c === 'USD' ? 'pill-usd' : c === 'EUR' ? 'pill-eur' : 'pill-other';
+    return `<span class="pill ${cls}">${esc(c)}</span>`;
+  }
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+  function setSpinner(on) { spinnerEl.classList.toggle('show', on); }
+  function setError(msg) {
+    errorEl.textContent = msg;
+    errorEl.classList.toggle('show', !!msg);
+  }
+</script>
+</body>
+</html>
