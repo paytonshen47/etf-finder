@@ -630,12 +630,15 @@
     if (!acResults.length) { acEl.classList.remove('show'); return; }
     acEl.innerHTML = acResults.map((r, i) => {
       const isEtf = r.type === 'ETF';
-      return `
-      <div class="ac-item" data-idx="${i}">
-        <span class="ac-ticker">${esc(r.symbol)}</span>
-        <span class="ac-name">${esc(r.name || '')}</span>
-        ${isEtf ? '<span class="ac-exchange" style="color:var(--accent);font-weight:700">ETF</span>' : `<span class="ac-exchange">${esc(r.exchange || '')}</span>`}
-      </div>`}).join('');
+      const badge = isEtf
+        ? '<span class="ac-exchange" style="color:var(--accent);font-weight:700">ETF</span>'
+        : '<span class="ac-exchange">' + esc(r.exchange || '') + '</span>';
+      return '<div class="ac-item" data-idx="' + i + '">'
+        + '<span class="ac-ticker">' + esc(r.symbol) + '</span>'
+        + '<span class="ac-name">' + esc(r.name || '') + '</span>'
+        + badge
+        + '</div>';
+    }).join('');
     acEl.querySelectorAll('.ac-item').forEach(el => {
       el.addEventListener('click', () => selectAC(+el.dataset.idx));
       el.addEventListener('mouseenter', () => { acFocused = +el.dataset.idx; highlightAC(); });
