@@ -628,13 +628,14 @@
 
   function renderAC() {
     if (!acResults.length) { acEl.classList.remove('show'); return; }
-    acEl.innerHTML = acResults.map((r, i) => `
+    acEl.innerHTML = acResults.map((r, i) => {
+      const isEtf = r.type === 'ETF';
+      return `
       <div class="ac-item" data-idx="${i}">
         <span class="ac-ticker">${esc(r.symbol)}</span>
         <span class="ac-name">${esc(r.name || '')}</span>
-        <span class="ac-exchange">${esc(r.exchangeShortName || r.stockExchange || '')}</span>
-      </div>
-    `).join('');
+        ${isEtf ? '<span class="ac-exchange" style="color:var(--accent);font-weight:700">ETF</span>' : `<span class="ac-exchange">${esc(r.exchange || '')}</span>`}
+      </div>`}).join('');
     acEl.querySelectorAll('.ac-item').forEach(el => {
       el.addEventListener('click', () => selectAC(+el.dataset.idx));
       el.addEventListener('mouseenter', () => { acFocused = +el.dataset.idx; highlightAC(); });
@@ -657,6 +658,17 @@
   function selectAC(idx) {
     const item = acResults[idx] || acResults[0];
     if (!item) return;
+    acEl.classList.remove('show');
+
+    // If the user selected an ETF directly → open its detail panel immediately
+    if (item.type === 'ETF') {
+      searchEl.value = '';
+      searchEl.placeholder = 'Stock name or ticker — e.g. Rheinmetall, NVDA, ASML…';
+      hintEl.classList.add('hide');
+      openPanel(item.symbol, item.name || item.symbol);
+      return;
+    }
+
     selectedSymbol = item.symbol;
     selectedName = item.name || item.symbol;
     searchEl.value = '';
@@ -664,7 +676,6 @@
     selectedLabel.textContent = `${item.symbol} · ${item.name || ''}`;
     selectedEl.classList.add('show');
     btnEl.disabled = false;
-    acEl.classList.remove('show');
     doSearch();
   }
 
@@ -775,7 +786,7 @@
     resultsLabel.textContent = `${count} ETF${count !== 1 ? 's' : ''} hold ${selectedSymbol}`;
 
     resultsBody.innerHTML = rows.map(r => `
-      <tr data-symbol="${esc(r.symbol)}">
+      <tr data-symbol="${esc(r.symbol)}" data-name="${esc(r.name || '')}">`
         <td class="td-symbol">${esc(r.symbol)}</td>
         <td class="td-name" title="${esc(r.name || '')}">${esc(r.name || '—')}</td>
         <td class="td-weight">${r.weight != null ? r.weight.toFixed(2) + '%' : '<span class="na">—</span>'}</td>
@@ -787,7 +798,7 @@
     `).join('');
 
     resultsBody.querySelectorAll('tr').forEach(tr => {
-      tr.addEventListener('click', () => openPanel(tr.dataset.symbol));
+      tr.addEventListener('click', () => openPanel(tr.dataset.symbol, tr.dataset.name));
     });
 
     if (rows.length === 0) {
@@ -799,10 +810,10 @@
   }
 
   // ── ETF Detail Panel ──
-  async function openPanel(symbol) {
+  async function openPanel(symbol, fallbackName) {
     const etf = allResults.find(r => r.symbol === symbol);
     panelTitle.textContent = symbol;
-    panelSubtitle.textContent = etf?.name || '';
+    panelSubtitle.textContent = etf?.name || fallbackName || '';
     panelBody.innerHTML = `
       <div class="panel-loading">
         <div class="spinner show"></div>
@@ -835,7 +846,9 @@
       { label: 'Inception', value: info.inceptionDate || '—' },
     ];
 
-    const perfKeys = ['YTD', '2024', '2023', '2022', '2021', '2020'];
+    // Show YTD + all available years, newest first
+    const currentYear = new Date().getFullYear();
+    const perfKeys = ['YTD', ...Array.from({length: 7}, (_, i) => String(currentYear - 1 - i))];
     const perfVals = perfKeys.filter(k => perf[k] != null).map(k => ({ label: k, val: perf[k] }));
     const maxAbs = perfVals.length ? Math.max(...perfVals.map(p => Math.abs(p.val))) : 1;
 

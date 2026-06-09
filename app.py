@@ -1,6 +1,5 @@
 """
-ETF Finder — powered by a pre-built holdings database + Yahoo Finance for details.
-Lookup is instant (JSON file); details fetched on demand.
+ETF Finder — pre-built holdings DB + live Yahoo Finance supplement + direct ETF lookup.
 """
 import asyncio
 import json
@@ -12,11 +11,11 @@ from pathlib import Path
 
 import uvicorn
 import yfinance as yf
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
 app = FastAPI()
-_pool = ThreadPoolExecutor(max_workers=6)
+_pool = ThreadPoolExecutor(max_workers=8)
 
 # ── Load holdings database ────────────────────────────────────────────────────
 _DB_PATH = Path(__file__).parent / "etf_holdings.json"
@@ -29,7 +28,7 @@ def _load_db():
 
 _DB = _load_db()
 
-# ── Simple in-memory cache (TTL = 1 hour) ────────────────────────────────────
+# ── Cache (TTL = 1 hour) ──────────────────────────────────────────────────────
 _cache: dict[str, tuple[float, object]] = {}
 CACHE_TTL = 3600
 
@@ -52,8 +51,7 @@ async def _run(fn, *args, **kwargs):
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    p = Path(__file__).parent / "index.html"
-    return p.read_text()
+    return (Path(__file__).parent / "index.html").read_text()
 
 
 @app.get("/api/search")
@@ -85,74 +83,189 @@ async def search(q: str = Query(..., min_length=1)):
 
 @app.get("/api/etfs/{symbol:path}")
 async def etfs_for_stock(symbol: str):
+    """Reverse lookup: which ETFs hold this stock?
+    Stage 1 (instant): pre-built DB.
+    Stage 2 (live):    mutualfund_holders to catch ETFs outside the top-10 snapshot.
+    """
     symbol = symbol.upper()
-    reverse = _DB.get("reverse", {})
+    key = f"etfs:{symbol}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    reverse   = _DB.get("reverse", {})
     etfs_meta = _DB.get("etfs", {})
 
-    etf_syms = reverse.get(symbol, [])
-    if not etf_syms:
-        return []
+    # ── Stage 1: DB lookup ────────────────────────────────────────────────────
+    db_syms = set(reverse.get(symbol, []))
 
-    results = []
-    for etf_sym in etf_syms:
-        meta = etfs_meta.get(etf_sym, {})
-        # Find this stock's weight in the ETF
-        weight = None
-        for h in meta.get("holdings", []):
-            if h["symbol"].upper() == symbol:
-                weight = h["pct"]
-                break
-        results.append({
-            "symbol": etf_sym,
-            "name": meta.get("name", etf_sym),
-            "weight": weight,
-            "aum": meta.get("aum"),
+    db_results = {}
+    for etf_sym in db_syms:
+        meta   = etfs_meta.get(etf_sym, {})
+        weight = next(
+            (h["pct"] for h in meta.get("holdings", []) if h["symbol"].upper() == symbol),
+            None,
+        )
+        db_results[etf_sym] = {
+            "symbol":       etf_sym,
+            "name":         meta.get("name", etf_sym),
+            "weight":       weight,
+            "aum":          meta.get("aum"),
             "expenseRatio": meta.get("expenseRatio"),
-            "currency": meta.get("currency", "USD"),
-            "dividendYield": meta.get("dividendYield"),
-            "category": meta.get("category"),
-        })
+            "currency":     meta.get("currency", "USD"),
+            "dividendYield":meta.get("dividendYield"),
+            "category":     meta.get("category"),
+        }
 
-    # Sort by weight descending
-    results.sort(key=lambda x: x.get("weight") or 0, reverse=True)
+    # ── Stage 2: live supplement via mutualfund_holders ───────────────────────
+    def _live_holders():
+        try:
+            mfh = yf.Ticker(symbol).mutualfund_holders
+            stock_info = yf.Ticker(symbol).info
+            return mfh, stock_info
+        except Exception:
+            return None, {}
+
+    mfh, stock_info = await _run(_live_holders)
+
+    if mfh is not None and not mfh.empty:
+        currency = stock_info.get("currency", "USD")
+
+        def _resolve_one(row):
+            holder_name: str = row.get("Holder", "")
+            parts       = holder_name.split("-", 1)
+            search_name = parts[1].strip() if len(parts) > 1 else holder_name.strip()
+            value       = float(row.get("Value") or 0)
+
+            try:
+                quotes = yf.Search(search_name, max_results=4).quotes
+                etf_sym = None
+                for q in quotes:
+                    s = q.get("symbol", "")
+                    qt = q.get("quoteType", "")
+                    if qt in ("ETF", "MUTUALFUND") and "." not in s and "-" not in s:
+                        etf_sym = s
+                        break
+                if not etf_sym:
+                    for q in quotes:
+                        s = q.get("symbol", "")
+                        if s and "." not in s and "-" not in s:
+                            etf_sym = s
+                            break
+                if not etf_sym:
+                    return None
+
+                # Skip if already in DB results
+                if etf_sym in db_results:
+                    return None
+
+                etf_info = yf.Ticker(etf_sym).info
+                aum = etf_info.get("totalAssets") or 0
+
+                # Compute approximate weight
+                weight = None
+                if aum and value:
+                    fx = _usd_fx_sync(currency)
+                    weight = round((value * fx / aum) * 100, 3)
+
+                # Expense ratio
+                exp = None
+                try:
+                    ops = yf.Ticker(etf_sym).funds_data.fund_operations
+                    if ops is not None and not ops.empty:
+                        exp = round(float(ops.loc["Annual Report Expense Ratio"].iloc[0]), 6)
+                except Exception:
+                    pass
+
+                return {
+                    "symbol":       etf_sym,
+                    "name":         etf_info.get("longName") or etf_info.get("shortName") or etf_sym,
+                    "weight":       weight,
+                    "aum":          aum or None,
+                    "expenseRatio": exp,
+                    "currency":     etf_info.get("currency", "USD"),
+                    "dividendYield":etf_info.get("yield") or etf_info.get("trailingAnnualDividendYield"),
+                    "category":     etf_info.get("category"),
+                }
+            except Exception:
+                return None
+
+        rows = mfh.to_dict("records")
+        live_tasks = [_run(_resolve_one, r) for r in rows]
+        live_results = await asyncio.gather(*live_tasks)
+        for r in live_results:
+            if r:
+                db_results[r["symbol"]] = r
+
+    results = sorted(db_results.values(), key=lambda x: x.get("weight") or 0, reverse=True)
+    _cache_set(key, results)
     return results
 
 
 @app.get("/api/etf/{symbol:path}")
 async def etf_detail(symbol: str):
+    """Detail view for any ETF — works for ETFs in DB and ones discovered live."""
     symbol = symbol.upper()
-    key = f"etf_detail:{symbol}"
+    key    = f"etf_detail:{symbol}"
     cached = _cache_get(key)
     if cached is not None:
         return cached
 
-    # Holdings from DB (fast)
     meta = _DB.get("etfs", {}).get(symbol, {})
-    holdings = meta.get("holdings", [])
 
     def _fetch_live():
-        t = yf.Ticker(symbol)
+        t    = yf.Ticker(symbol)
         info = t.info
         hist = t.history(period="6y", interval="1mo", auto_adjust=True)
-        return info, hist
 
-    info, hist = await _run(_fetch_live)
+        # If ETF not in DB, fetch holdings live
+        holdings = meta.get("holdings", [])
+        if not holdings:
+            try:
+                fd = t.funds_data
+                th = fd.top_holdings
+                if th is not None and not th.empty:
+                    holdings = [
+                        {"symbol": sym, "name": str(row.get("Name", "")),
+                         "pct": round(float(row.get("Holding Percent", 0)) * 100, 3)}
+                        for sym, row in th.iterrows()
+                    ]
+            except Exception:
+                pass
+
+        # Expense ratio
+        exp = meta.get("expenseRatio")
+        if exp is None:
+            try:
+                ops = t.funds_data.fund_operations
+                if ops is not None and not ops.empty:
+                    exp = round(float(ops.loc["Annual Report Expense Ratio"].iloc[0]), 6)
+            except Exception:
+                pass
+
+        return info, hist, holdings, exp
+
+    info, hist, holdings, exp = await _run(_fetch_live)
     performance = _calc_performance(hist)
 
-    # Expense ratio: prefer DB (already fetched), fall back to live
-    exp = meta.get("expenseRatio")
+    # Rename pct → weightPercentage for frontend compatibility
+    holdings_out = [
+        {"asset": h.get("symbol", ""), "name": h.get("name", ""),
+         "weightPercentage": h.get("pct", h.get("weightPercentage", 0))}
+        for h in holdings
+    ]
 
     result = {
         "info": {
-            "name": info.get("longName") or info.get("shortName") or symbol,
-            "aum": info.get("totalAssets") or meta.get("aum"),
-            "expenseRatio": exp,
-            "currency": info.get("currency", "USD"),
+            "name":          info.get("longName") or info.get("shortName") or symbol,
+            "aum":           info.get("totalAssets") or meta.get("aum"),
+            "expenseRatio":  exp,
+            "currency":      info.get("currency", "USD"),
             "dividendYield": info.get("yield") or info.get("trailingAnnualDividendYield"),
-            "category": info.get("category") or meta.get("category"),
-            "description": info.get("longBusinessSummary") or "",
+            "category":      info.get("category") or meta.get("category"),
+            "description":   info.get("longBusinessSummary") or "",
         },
-        "holdings": holdings,
+        "holdings":    holdings_out,
         "performance": performance,
     }
     _cache_set(key, result)
@@ -166,35 +279,52 @@ def _calc_performance(hist) -> dict:
         prices = hist["Close"].dropna()
         if prices.empty:
             return {}
-        today = date.today()
+        today        = date.today()
         current_year = today.year
-        result = {}
+        result       = {}
 
         def price_near(target: date):
             for delta in range(0, 7):
-                check = (target + timedelta(days=delta * 30)).strftime("%Y-%m")
+                check   = (target + timedelta(days=delta * 30)).strftime("%Y-%m")
                 matches = [float(p) for idx, p in prices.items() if idx.strftime("%Y-%m") == check]
                 if matches:
                     return matches[0]
             for delta in range(1, 4):
-                check = (target - timedelta(days=delta * 30)).strftime("%Y-%m")
+                check   = (target - timedelta(days=delta * 30)).strftime("%Y-%m")
                 matches = [float(p) for idx, p in prices.items() if idx.strftime("%Y-%m") == check]
                 if matches:
                     return matches[0]
             return None
 
-        latest = float(prices.iloc[-1])
+        latest  = float(prices.iloc[-1])
         p_start = price_near(date(current_year, 1, 1))
         if p_start:
             result["YTD"] = round((latest / p_start - 1) * 100, 2)
-        for yr in range(2020, current_year):
+
+        for yr in range(current_year - 1, 2019, -1):   # most recent first
             p1 = price_near(date(yr, 1, 1))
             p2 = price_near(date(yr, 12, 1))
             if p1 and p2:
                 result[str(yr)] = round((p2 / p1 - 1) * 100, 2)
+
         return result
     except Exception:
         return {}
+
+
+def _usd_fx_sync(currency: str) -> float:
+    if not currency or currency.upper() == "USD":
+        return 1.0
+    key    = f"fx:{currency.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    try:
+        rate = yf.Ticker(f"{currency.upper()}USD=X").info.get("regularMarketPrice") or 1.0
+        _cache_set(key, float(rate))
+        return float(rate)
+    except Exception:
+        return 1.0
 
 
 if __name__ == "__main__":

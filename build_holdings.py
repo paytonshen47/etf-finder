@@ -22,6 +22,8 @@ ETFS = [
     "VGT","FTEC","IGV","SOXX","SMH","SOXQ","QTEC","PSI","XSMO",
     "ARKK","ARKG","ARKW","ARKF","ARKQ","ARKX",
     "WCLD","BUG","CLOU","SKYY","IGN","FDN","IVES",
+    # Memory / DRAM
+    "DRAM",
     # Semiconductors / AI
     "SOXL","FNGU","TECL","USD","NVDL","TQQQ",
     # Defense / Aerospace
