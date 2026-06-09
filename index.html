@@ -789,7 +789,7 @@
     resultsLabel.textContent = `${count} ETF${count !== 1 ? 's' : ''} hold ${selectedSymbol}`;
 
     resultsBody.innerHTML = rows.map(r => `
-      <tr data-symbol="${esc(r.symbol)}" data-name="${esc(r.name || '')}">`
+      <tr data-symbol="${esc(r.symbol)}" data-name="${esc(r.name || '')}">
         <td class="td-symbol">${esc(r.symbol)}</td>
         <td class="td-name" title="${esc(r.name || '')}">${esc(r.name || '—')}</td>
         <td class="td-weight">${r.weight != null ? r.weight.toFixed(2) + '%' : '<span class="na">—</span>'}</td>
